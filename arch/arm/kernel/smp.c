@@ -99,7 +99,12 @@ static unsigned long get_arch_pgd(pgd_t *pgd)
 #endif
 }
 
+#ifdef CONFIG_SMP_STEALTH_DISCO
+static int cpu_up_with_entry(unsigned int cpu, struct task_struct *idle,
+	void (*entry)(void*), void* data)
+#else
 int __cpu_up(unsigned int cpu, struct task_struct *idle)
+#endif
 {
 	int ret;
 
@@ -111,6 +116,10 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 	 * its stack and the page tables.
 	 */
 	secondary_data.stack = task_stack_page(idle) + THREAD_START_SP;
+#ifdef CONFIG_SMP_STEALTH_DISCO
+	secondary_data.alt_entry = entry;
+	secondary_data.alt_data = data;
+#endif
 #ifdef CONFIG_ARM_MPU
 	secondary_data.mpu_rgn_szr = mpu_rgn_info.rgns[MPU_RAM_REGION].drsr;
 #endif
@@ -133,7 +142,11 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 		wait_for_completion_timeout(&cpu_running,
 						 msecs_to_jiffies(1000));
 
+#ifdef CONFIG_SMP_STEALTH_DISCO
+		if (entry == NULL && !cpu_online(cpu)) {
+#else
 		if (!cpu_online(cpu)) {
+#endif
 			pr_crit("CPU%u: failed to come online\n", cpu);
 			ret = -EIO;
 		}
@@ -145,6 +158,71 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 	memset(&secondary_data, 0, sizeof(secondary_data));
 	return ret;
 }
+
+#ifdef CONFIG_SMP_STEALTH_DISCO
+struct task_struct* idle_thread_get(unsigned int);
+
+int __cpu_up(unsigned int cpu, struct task_struct *idle)
+{
+	return cpu_up_with_entry(cpu, idle, NULL, NULL);
+}
+
+
+int start_cpu_with_entry(unsigned int cpu, void (*entry)(void*), void* data)
+{
+	int ret;
+	struct task_struct *idle;
+
+	if (!smp_ops.smp_boot_secondary)
+		return -ENOSYS;
+
+	if (!cpu_present(cpu)) {
+		pr_err("CPU%u: not present\n", cpu);
+		return -ENXIO;
+	}
+
+	if (cpu_online(cpu)) {
+		pr_err("CPU%u: already online\n", cpu);
+		return -EBUSY;
+	}
+
+	idle = idle_thread_get(cpu);
+	if (idle == NULL) {
+		pr_err("CPU%u: idle thread not present\n", cpu);
+		return -ENXIO;
+	}
+
+	irq_lock_sparse();
+
+	ret = cpu_up_with_entry(cpu, idle, entry, data);
+
+	irq_unlock_sparse();
+
+	return ret;
+}
+EXPORT_SYMBOL(start_cpu_with_entry);
+
+int stop_cpu_with_entry()
+{
+	unsigned int cpu = smp_processor_id();
+
+	local_irq_disable();
+	local_fiq_disable();
+
+	flush_cache_louis();
+	local_flush_tlb_all();
+
+	clear_tasks_mm_cpumask(cpu);
+
+	if (!smp_ops.cpu_die)
+		return -ENOSYS;
+
+	smp_ops.cpu_die(cpu);
+
+	return -EIO;
+}
+EXPORT_SYMBOL(stop_cpu_with_entry);
+#endif
 
 /* platform specific SMP operations */
 void __init smp_init_cpus(void)
@@ -328,6 +406,9 @@ void arch_cpu_idle_dead(void)
 	 */
 	__asm__("mov	sp, %0\n"
 	"	mov	fp, #0\n"
+#ifdef CONFIG_SMP_STEALTH_DISCO
+	"	mov	r0, #0\n"
+#endif
 	"	b	secondary_start_kernel"
 		:
 		: "r" (task_stack_page(current) + THREAD_SIZE - 8));
@@ -352,7 +433,11 @@ static void smp_store_cpu_info(unsigned int cpuid)
  * This is the secondary CPU boot entry.  We're using this CPUs
  * idle thread stack, but a set of temporary page tables.
  */
+#ifdef CONFIG_SMP_STEALTH_DISCO
+asmlinkage void secondary_start_kernel(void (*entry)(void*), void* data)
+#else
 asmlinkage void secondary_start_kernel(void)
+#endif
 {
 	struct mm_struct *mm = &init_mm;
 	unsigned int cpu;
@@ -399,6 +484,13 @@ asmlinkage void secondary_start_kernel(void)
 	 * the CPU migration code to notice that the CPU is online
 	 * before we continue - which happens after __cpu_up returns.
 	 */
+#ifdef CONFIG_SMP_STEALTH_DISCO
+	if (entry != NULL) {
+		complete(&cpu_running);
+		entry(data);
+		stop_cpu_with_entry();
+	}
+#endif
 	set_cpu_online(cpu, true);
 	complete(&cpu_running);
 

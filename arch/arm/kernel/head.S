@@ -418,6 +418,10 @@ ENDPROC(secondary_startup_arm)
 ENTRY(__secondary_switched)
 	ldr	sp, [r7, #12]			@ get secondary_data.stack
 	mov	fp, #0
+#ifdef CONFIG_SMP_STEALTH_DISCO
+	ldr	r0, [r7, #16]			@ secondary_data.alt_entry
+	ldr	r1, [r7, #20]			@ secondary_data.alt_data
+#endif
 	b	secondary_start_kernel
 ENDPROC(__secondary_switched)
 

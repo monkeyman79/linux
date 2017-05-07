@@ -1461,6 +1461,13 @@ config HOTPLUG_CPU
 	  Say Y here to experiment with turning CPUs off and on.  CPUs
 	  can be controlled through /sys/devices/system/cpu.
 
+config SMP_STEALTH_DISCO
+	bool "Allow starting offline CPUs with arbitrary entry function"
+	depends on SMP
+	help
+	  Enables functions which allow running arbitrary code on offline
+	  CPUs behind kernel's back.
+
 config ARM_PSCI
 	bool "Support for the ARM Power State Coordination Interface (PSCI)"
 	depends on HAVE_ARM_SMCCC

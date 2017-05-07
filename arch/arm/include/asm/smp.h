@@ -52,7 +52,11 @@ extern void set_smp_cross_call(void (*)(const struct cpumask *, unsigned int));
  * Called from platform specific assembly code, this is the
  * secondary CPU entry point.
  */
+#ifdef CONFIG_SMP_STEALTH_DISCO
+asmlinkage void secondary_start_kernel(void (*entry)(void*), void* data);
+#else
 asmlinkage void secondary_start_kernel(void);
+#endif
 
 
 /*
@@ -65,7 +69,12 @@ struct secondary_data {
 	};
 	unsigned long swapper_pg_dir;
 	void *stack;
+#ifdef CONFIG_SMP_STEALTH_DISCO
+	void (*alt_entry)(void*);
+	void *alt_data;
+#endif
 };
+
 extern struct secondary_data secondary_data;
 extern volatile int pen_release;
 extern void secondary_startup(void);
@@ -123,5 +132,10 @@ struct of_cpu_method {
  * set platform specific SMP operations
  */
 extern void smp_set_ops(const struct smp_operations *);
+
+#ifdef CONFIG_SMP_STEALTH_DISCO
+extern int start_cpu_with_entry(unsigned int cpu, void (*)(void*), void*);
+extern int stop_cpu_with_entry(void);
+#endif
 
 #endif /* ifndef __ASM_ARM_SMP_H */
